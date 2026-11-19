@@ -1,4 +1,4 @@
-/** Login próprio: senha com scrypt, cookie de sessão assinado (HMAC) e conferência da conta no banco a cada requisição. */
+/** Acesso corporativo: senha com scrypt (salt por usuário), cookie de sessão assinado (HMAC) e conferência da conta no banco a cada requisição. */
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
 import { q } from "./db";
@@ -61,7 +61,7 @@ export function opcoesCookie(req: Request, maxAge = horasSessao() * 3600) {
 export async function sessao(): Promise<Usuario | null> {
   const t = lerToken((await cookies()).get(COOKIE)?.value);
   if (!t) return null;
-  const [u] = await q("select id,usuario,nome,papel,email,setor,ativo,sessao_desde from gp_usuarios where usuario=$1", [t.usuario]);
-  if (!u || !u.ativo || new Date(u.sessao_desde).getTime() > t.emitidoEm) return null;
+  const [u] = await q("select id,usuario,nome,papel,email,setor,ativo,sessao_desde,senha_hash is not null senha from gp_usuarios where usuario=$1", [t.usuario]);
+  if (!u || !u.ativo || !u.senha || new Date(u.sessao_desde).getTime() > t.emitidoEm) return null;
   return { id: u.id, usuario: u.usuario, nome: u.nome, papel: u.papel, email: u.email, setor: u.setor };
 }

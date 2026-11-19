@@ -9,9 +9,9 @@ export async function lerListas(): Promise<Listas> {
   return normalizarListas(l);
 }
 
-/** Atendentes = usuários ativos com papel Administrador/Atendente. */
+/** Quem pode ser responsável: administradores e atendentes ativos e com acesso ativado. */
 export async function listarAtendentes(): Promise<{ usuario: string; nome: string }[]> {
-  return (await q("select usuario,nome from gp_usuarios where papel='admin' and ativo order by nome")) as { usuario: string; nome: string }[];
+  return (await q("select usuario,nome from gp_usuarios where papel in('admin','atendente') and ativo and senha_hash is not null order by nome")) as { usuario: string; nome: string }[];
 }
 
 export const COLUNAS_CHAMADO = `c.id,c.numero::int numero,c.titulo,c.sistema,c.tipo,c.prioridade,c.status,c.solicitante_usuario,c.solicitante_nome,

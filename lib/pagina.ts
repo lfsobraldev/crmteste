@@ -14,6 +14,7 @@ const I = {
   ano: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18"/><path d="M6 17V11M10 17V7M14 17v-4M18 17V4"/></svg>',
   cfg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>',
   senha: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>',
+  users: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></svg>',
   sair: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 4h4v16h-4"/><path d="M10 8l-4 4 4 4M6 12h10"/></svg>',
   filtro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg>',
   csv: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>',
@@ -50,7 +51,8 @@ export function paginaGestaoProcessos(v: string) {
   </nav>
   <div class="side-foot">
     <div class="me" id="me" hidden></div>
-    <button class="side-btn" id="btnCfg" type="button" title="Usuários, sistemas, setores, tipos, jornadas e pessoas" hidden>${I.cfg}<span>Cadastros</span></button>
+    <button class="side-btn" id="btnCfg" type="button" title="Sistemas, setores, tipos, jornadas e pessoas" hidden>${I.cfg}<span>Cadastros</span></button>
+    <button class="side-btn" id="btnUsers" type="button" title="Usuários e níveis de acesso" hidden>${I.users}<span>Usuários</span></button>
     <button class="side-btn" id="btnSenha" type="button" title="Trocar minha senha">${I.senha}<span>Minha senha</span></button>
     <button class="side-btn" id="btnSair" type="button" title="Sair">${I.sair}<span>Sair</span></button>
     <div class="sync"><span class="dot" id="syncDot"></span><span id="syncTxt">Conectando…</span></div>

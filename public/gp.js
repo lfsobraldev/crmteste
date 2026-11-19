@@ -544,15 +544,15 @@ async function openChamado(id,avisos){
 function openCfg(){const L=S.lists;const ta=(id,lab,arr,hint)=>'<div class="fld s3"><label for="'+id+'">'+lab+'</label><textarea class="inp" id="'+id+'" rows="7">'+esc((arr||[]).join("\n"))+'</textarea><span class="meta-l">'+hint+"</span></div>";
   $("ov").innerHTML='<form class="modal" id="cf"><div class="m-h"><h3>Cadastros</h3><button type="button" class="btn ghost" data-close aria-label="Fechar">✕</button></div><div class="m-b">'+
   ta("c-sis","Sistemas (Central de Chamados)",L.sistemas,"Um por linha. Aparecem em Abrir chamado.")+
-  '<div class="fld s3"><label>Usuários e perfis</label><ul class="att-list" id="c-us"><li><span class="sub">Carregando…</span></li></ul><div><button type="button" class="btn" id="c-usb">Gerenciar usuários</button></div><span class="meta-l">Administrador/Atendente vê todos os chamados e faz a triagem. Solicitante abre e acompanha os próprios chamados.</span></div>'+
+  (S.super?'<div class="fld s3"><label>Usuários e perfis</label><ul class="att-list" id="c-us"><li><span class="sub">Carregando…</span></li></ul><div><button type="button" class="btn" id="c-usb">Gerenciar usuários</button></div><span class="meta-l">Administrador gerencia usuários. Atendente vê todos os chamados e faz a triagem. Solicitante abre e acompanha os próprios chamados.</span></div>':'')+
   ta("c-set","Setores",L.setores,"Um por linha")+ta("c-tip","Tipos de tarefa",L.tipos,"Um por linha")+ta("c-jor","Jornadas",L.jornadas,"Ex.: Manhã, Tarde, Dia inteiro")+ta("c-pes","Pessoas (sugestão de responsável)",L.pessoas,"Um nome por linha")+
   '<div class="fld s6"><label for="c-imp">Importar tarefas do protótipo (dados-tarefas.json)</label><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input class="inp" type="file" id="c-imp" accept=".json,application/json" style="flex:1;min-width:0"><button type="button" class="btn" id="c-impb">Importar</button></div><span class="meta-l" id="c-impr">Tarefas já importadas (mesmo id) são ignoradas; não há duplicação.</span></div>'+
   '<div class="s6 err" id="c-err" hidden></div></div><div class="m-f"><span class="sp"></span><button type="button" class="btn" data-close>Cancelar</button><button type="submit" class="btn pri">Salvar cadastros</button></div></form>';
   $("ov").hidden=false;ovDirty=false;
   const err=m=>{$("c-err").textContent=m;$("c-err").hidden=false;};
-  api("/usuarios").then(r=>{const us=r.usuarios||[];const at=us.filter(u=>u.ativo);
-    $("c-us").innerHTML='<li><span><b>'+fmtN(at.filter(u=>u.papel==="admin").length)+'</b> administrador(es)/atendente(s) · <b>'+fmtN(at.filter(u=>u.papel!=="admin").length)+'</b> solicitante(s)'+(us.length>at.length?' · '+fmtN(us.length-at.length)+' inativo(s)':'')+"</span></li>";}).catch(e=>{$("c-us").innerHTML='<li><span class="err">'+esc(errMsg(e))+"</span></li>";});
-  $("c-usb").onclick=()=>{if(ovDirty&&!confirmDescartar())return;ovDirty=false;openUsuarios();};
+  if(S.super){api("/usuarios").then(r=>{const us=r.usuarios||[];const at=us.filter(u=>u.ativo);const n=p=>at.filter(u=>u.papel===p).length;
+    $("c-us").innerHTML='<li><span><b>'+fmtN(n("admin"))+'</b> admin · <b>'+fmtN(n("atendente"))+'</b> atendente(s) · <b>'+fmtN(n("solicitante"))+'</b> solicitante(s)'+(us.length>at.length?' · '+fmtN(us.length-at.length)+' bloqueado(s)':'')+"</span></li>";}).catch(e=>{$("c-us").innerHTML='<li><span class="err">'+esc(errMsg(e))+"</span></li>";});
+  $("c-usb").onclick=()=>{if(ovDirty&&!confirmDescartar())return;ovDirty=false;openUsuarios();};}
   $("c-impb").onclick=async()=>{const f=$("c-imp").files[0];if(!f)return err("Escolha o arquivo dados-tarefas.json.");
     let j;try{j=JSON.parse(await f.text());}catch(x){return err("O arquivo não é um JSON válido.");}
     const b=$("c-impb");b.disabled=true;b.textContent="Importando…";
@@ -565,43 +565,55 @@ function openCfg(){const L=S.lists;const ta=(id,lab,arr,hint)=>'<div class="fld 
     try{const r=await api("/listas",{method:"PUT",body:l});S.lists=r.listas;ovDirty=false;toast("Cadastros salvos");closeOv(true);render();}catch(ex){err(errMsg(ex));}});
 }
 
-/* ---------- Usuários (somente Administrador/Atendente) ---------- */
-const PAPEL={admin:"Administrador / Atendente",solicitante:"Solicitante"};
+/* ---------- Usuários (somente Administrador) ---------- */
+const PAPEL={admin:"Administrador",atendente:"Atendente",solicitante:"Solicitante"};
+const PAPEL_D={admin:"tudo, inclusive usuários e níveis de acesso",atendente:"todos os chamados, triagem, tarefas e cadastros",solicitante:"abre e acompanha os próprios chamados"};
+const SIT={ativo:["Ativo","p-concluido"],pendente:["Aguardando ativação","p-aguardando"],bloqueado:["Bloqueado","p-cancelado"],travado:["Travado (tentativas)","p-atraso"]};
+const sitU=u=>!u.ativo?"bloqueado":!u.senha_definida?"pendente":u.bloqueado_ate?"travado":"ativo";
+let usFiltro="";
 async function openUsuarios(){
   $("ov").innerHTML='<div class="modal"><div class="m-h"><h3>Usuários</h3><button type="button" class="btn ghost" data-close aria-label="Fechar">✕</button></div><div class="m-b" style="display:block"><div class="empty">Carregando…</div></div></div>';$("ov").hidden=false;ovDirty=false;
-  let us=[];try{us=(await api("/usuarios")).usuarios||[];}catch(e){$("ov").querySelector(".m-b").innerHTML='<div class="note bad">'+esc(errMsg(e))+"</div>";return;}
-  $("ov").innerHTML='<div class="modal" style="max-width:820px"><div class="m-h"><h3>Usuários</h3><button type="button" class="btn ghost" data-close aria-label="Fechar">✕</button></div>'+
-   '<div class="m-b" style="display:block"><div class="ph"><span class="sub">'+plural(us.filter(u=>u.ativo).length,"usuário ativo","usuários ativos")+'</span><button type="button" class="btn pri" id="u-novo">Novo usuário</button></div>'+
-   '<div class="tscroll"><table class="t"><thead><tr><th>Nome</th><th>Login</th><th>Setor</th><th>Perfil</th><th>Situação</th></tr></thead><tbody>'+
-   us.map(u=>'<tr class="r" data-us="'+esc(u.id)+'"><td style="font-weight:700"><span class="av">'+esc(ini(u.nome))+"</span> "+esc(u.nome)+(u.usuario===S.me.usuario?' <span class="sub">(você)</span>':"")+'</td><td class="num">'+esc(u.usuario)+"</td><td>"+esc(u.setor||"—")+"</td><td>"+esc(PAPEL[u.papel]||u.papel)+"</td><td>"+(u.ativo?'<span class="pill p-concluido">Ativo</span>':'<span class="pill p-cancelado">Inativo</span>')+"</td></tr>").join("")+
-   "</tbody></table></div></div>"+
+  let r;try{r=await api("/usuarios");}catch(e){$("ov").querySelector(".m-b").innerHTML='<div class="note bad">'+esc(errMsg(e))+"</div>";return;}
+  const us=r.usuarios||[];
+  const draw=()=>{const f=usFiltro.toLowerCase();const v=us.filter(u=>!f||(u.nome+" "+u.email+" "+u.setor+" "+PAPEL[u.papel]).toLowerCase().includes(f));
+    $("us-body").innerHTML=v.length?v.map(u=>{const st=SIT[sitU(u)];return'<tr class="r" data-us="'+esc(u.id)+'"><td style="font-weight:700;min-width:170px"><span class="av">'+esc(ini(u.nome))+"</span> "+esc(u.nome)+(u.id===S.me.id?' <span class="sub">(você)</span>':"")+(u.setor?'<div class="sub" style="font-weight:600">'+esc(u.setor)+"</div>":"")+"</td><td>"+(u.email?esc(u.email):'<span class="sub">sem e-mail (conta antiga)</span>')+"</td><td>"+esc(PAPEL[u.papel]||u.papel)+'</td><td class="num" style="white-space:nowrap">'+(u.ultimo_acesso?fmtTS(u.ultimo_acesso):'<span class="sub">nunca</span>')+'</td><td style="white-space:nowrap"><span class="pill '+st[1]+'">'+st[0]+"</span></td></tr>";}).join(""):'<tr><td colspan="5" class="empty">Nenhum usuário encontrado.</td></tr>';};
+  $("ov").innerHTML='<div class="modal" style="max-width:960px"><div class="m-h"><h3>Usuários</h3><button type="button" class="btn ghost" data-close aria-label="Fechar">✕</button></div>'+
+   '<div class="m-b" style="display:block">'+(r.emailConfigurado?"":'<div class="note warn" style="margin-bottom:12px">O envio de e-mail não está configurado no servidor (SMTP). Sem ele, os links de ativação e de recuperação não chegam às pessoas.</div>')+
+   '<div class="ph"><input class="inp" id="us-q" type="search" placeholder="Buscar nome, e-mail, setor ou perfil…" value="'+esc(usFiltro)+'" style="flex:1;min-width:200px"><button type="button" class="btn pri" id="u-novo">Autorizar novo usuário</button></div>'+
+   '<div class="tscroll"><table class="t"><thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Último acesso</th><th>Situação</th></tr></thead><tbody id="us-body"></tbody></table></div>'+
+   '<div class="meta-l" style="margin-top:10px">'+plural(us.filter(u=>u.ativo).length,"usuário ativo","usuários ativos")+' · clique para editar, bloquear ou enviar link.</div></div>'+
    '<div class="m-f"><button type="button" class="btn" id="u-voltar">Voltar aos cadastros</button><span class="sp"></span><button type="button" class="btn" data-close>Fechar</button></div></div>';
-  $("u-novo").onclick=()=>openUsuario(null);$("u-voltar").onclick=openCfg;
-  $("ov").querySelector("tbody").addEventListener("click",e=>{const tr=e.target.closest("[data-us]");if(tr)openUsuario(us.find(u=>u.id===tr.dataset.us));});
+  draw();$("us-q").oninput=e=>{usFiltro=e.target.value;draw();};
+  $("u-novo").onclick=()=>openUsuario(null,r.emailConfigurado);$("u-voltar").onclick=openCfg;
+  $("us-body").addEventListener("click",e=>{const tr=e.target.closest("[data-us]");if(tr)openUsuario(us.find(u=>u.id===tr.dataset.us),r.emailConfigurado);});
 }
-function openUsuario(u){
-  const eu=u&&u.usuario===S.me.usuario;
-  $("ov").innerHTML='<form class="modal" id="uf" novalidate><div class="m-h"><h3>'+(u?"Editar usuário":"Novo usuário")+'</h3><button type="button" class="btn ghost" data-close aria-label="Fechar">✕</button></div><div class="m-b">'+
+function openUsuario(u,smtp){
+  const eu=u&&u.id===S.me.id;const st=u?sitU(u):"";
+  $("ov").innerHTML='<form class="modal" id="uf" novalidate><div class="m-h"><h3>'+(u?"Editar usuário":"Autorizar novo usuário")+'</h3><button type="button" class="btn ghost" data-close aria-label="Fechar">✕</button></div><div class="m-b">'+
+   '<div class="fld s3"><label for="u-email">E-mail corporativo *</label><input class="inp" id="u-email" type="email" maxlength="160" autocapitalize="none" spellcheck="false" placeholder="nome@famossul.com.br" value="'+esc(u?u.email:"")+'"'+(u?" readonly":"")+'></div>'+
    '<div class="fld s3"><label for="u-nome">Nome *</label><input class="inp" id="u-nome" maxlength="160" value="'+esc(u?u.nome:"")+'"></div>'+
-   '<div class="fld s3"><label for="u-login">Login *</label><input class="inp" id="u-login" maxlength="60" autocapitalize="none" spellcheck="false" value="'+esc(u?u.usuario:"")+'"'+(u?" readonly":"")+' placeholder="ex.: joao.silva"></div>'+
-   '<div class="fld s3"><label for="u-email">E-mail</label><input class="inp" id="u-email" type="email" maxlength="160" value="'+esc(u?u.email:"")+'"></div>'+
    '<div class="fld s3"><label for="u-setor">Setor</label><input class="inp" id="u-setor" list="dl-set" maxlength="80" value="'+esc(u?u.setor:"")+'"><datalist id="dl-set">'+(S.lists.setores||[]).map(x=>'<option value="'+esc(x)+'">').join("")+"</datalist></div>"+
-   '<div class="fld s3"><label for="u-papel">Perfil *</label><select class="sel" id="u-papel"'+(eu?" disabled":"")+'>'+["solicitante","admin"].map(p=>'<option value="'+p+'"'+((u?u.papel:"solicitante")===p?" selected":"")+">"+PAPEL[p]+"</option>").join("")+"</select></div>"+
-   '<div class="fld s3"><label for="u-senha">'+(u?"Nova senha (opcional)":"Senha inicial *")+'</label><input class="inp" id="u-senha" type="password" autocomplete="new-password" maxlength="200" placeholder="mínimo de 8 caracteres"'+(eu?' disabled title="Use Minha senha"':"")+'></div>'+
-   (u?'<label class="chk s6"><input type="checkbox" id="u-ativo"'+(u.ativo?" checked":"")+(eu?" disabled":"")+'> Conta ativa (desativar bloqueia o acesso e encerra as sessões abertas)</label>':"")+
-   '<div class="s6 meta-l">'+(u?"Trocar a senha, o perfil ou desativar encerra as sessões abertas dessa pessoa.":"Informe a senha inicial à pessoa; ela pode trocar em “Minha senha”.")+'</div>'+
-   '<div class="s6 err" id="u-err" hidden></div></div><div class="m-f"><button type="button" class="btn" id="u-lista">Voltar à lista</button><span class="sp"></span><button type="submit" class="btn pri" id="u-save">'+(u?"Salvar alterações":"Criar usuário")+"</button></div></form>";
-  $("ov").hidden=false;ovDirty=false;setTimeout(()=>$("u-nome").focus(),30);
+   '<div class="fld s3"><label for="u-papel">Perfil de acesso *</label><select class="sel" id="u-papel"'+(eu?' disabled title="Você não pode alterar o seu próprio nível de acesso"':"")+'>'+["solicitante","atendente","admin"].map(p=>'<option value="'+p+'"'+((u?u.papel:"solicitante")===p?" selected":"")+">"+PAPEL[p]+"</option>").join("")+'</select><span class="meta-l" id="u-pd"></span></div>'+
+   (u?'<label class="chk s6"><input type="checkbox" id="u-ativo"'+(u.ativo?" checked":"")+(eu?" disabled":"")+'> Conta ativa (desmarque para bloquear: o acesso é cortado na hora e os links pendentes deixam de valer)</label>'+
+      '<dl class="kv s6"><dt>Situação</dt><dd><span class="pill '+SIT[st][1]+'">'+SIT[st][0]+"</span></dd><dt>Último acesso</dt><dd>"+(u.ultimo_acesso?fmtTS(u.ultimo_acesso):"nunca")+"</dd><dt>Ativado em</dt><dd>"+(u.ativado_em?fmtTS(u.ativado_em):"—")+"</dd><dt>Autorizado em</dt><dd>"+fmtTS(u.criado_em)+"</dd></dl>"
+     :'<label class="chk s6"><input type="checkbox" id="u-conv"'+(smtp?" checked":" disabled")+'> Enviar agora o link de ativação para o e-mail (válido por 30 minutos)'+(smtp?"":" — envio de e-mail não configurado")+'</label><div class="s6 meta-l">A pessoa também pode pedir o link em “Primeiro acesso”, na tela de login. A senha é criada por ela; o administrador nunca vê nem define senhas.</div>')+
+   '<div class="s6 err" id="u-err" hidden></div><div class="s6 note ok" id="u-ok" hidden></div></div>'+
+   '<div class="m-f"><button type="button" class="btn" id="u-lista">Voltar à lista</button>'+(u&&u.ativo&&u.email&&!eu?'<button type="button" class="btn" id="u-link">'+(st==="pendente"?"Enviar link de ativação":"Enviar link de redefinição de senha")+"</button>":"")+'<span class="sp"></span><button type="submit" class="btn pri" id="u-save">'+(u?"Salvar alterações":"Autorizar usuário")+"</button></div></form>";
+  $("ov").hidden=false;ovDirty=false;setTimeout(()=>(u?$("u-nome"):$("u-email")).focus(),30);
+  const pd=()=>{$("u-pd").textContent=PAPEL_D[$("u-papel").value];};pd();$("u-papel").onchange=pd;
   $("u-lista").onclick=openUsuarios;
-  $("uf").addEventListener("submit",async e=>{e.preventDefault();const er=$("u-err");er.hidden=true;const fail=m=>{er.textContent=m;er.hidden=false;};
-    const body={nome:$("u-nome").value.trim(),email:$("u-email").value.trim(),setor:$("u-setor").value.trim(),papel:$("u-papel").value,senha:$("u-senha").value};
+  const er=$("u-err");const fail=m=>{$("u-ok").hidden=true;er.textContent=m;er.hidden=false;};
+  const lk=$("u-link");if(lk)lk.onclick=async()=>{er.hidden=true;lk.disabled=true;const t=lk.textContent;lk.textContent="Enviando…";
+    try{const r=await api("/usuarios/convite",{method:"POST",body:{id:u.id}});$("u-ok").textContent=(r.tipo==="ativacao"?"Link de ativação":"Link de redefinição")+" enviado para "+u.email+". Vale por 30 minutos.";$("u-ok").hidden=false;}catch(e){fail(errMsg(e));}finally{lk.disabled=false;lk.textContent=t;}};
+  $("uf").addEventListener("submit",async e=>{e.preventDefault();er.hidden=true;
+    const body={nome:$("u-nome").value.trim(),setor:$("u-setor").value.trim(),papel:$("u-papel").value};
     if(body.nome.length<2)return fail("Informe o nome.");
-    if(!u){body.usuario=$("u-login").value.trim().toLowerCase();if(!/^[a-z0-9._-]{3,60}$/.test(body.usuario))return fail("Login: 3 a 60 caracteres, só letras minúsculas, números, ponto, hífen ou sublinhado.");if(body.senha.length<8)return fail("A senha inicial precisa ter pelo menos 8 caracteres.");}
-    else{body.id=u.id;body.ativo=$("u-ativo").checked;if(body.senha&&body.senha.length<8)return fail("A nova senha precisa ter pelo menos 8 caracteres.");}
+    if(!u){body.email=$("u-email").value.trim().toLowerCase();if(!/^[a-z0-9._%+-]+@famossul\.com\.br$/.test(body.email))return fail("Use um e-mail corporativo @famossul.com.br.");body.enviarConvite=$("u-conv").checked;}
+    else{body.id=u.id;body.ativo=$("u-ativo").checked;}
     const b=$("u-save");b.disabled=true;b.textContent="Salvando…";
-    try{await api("/usuarios",{method:u?"PATCH":"POST",body});toast(u?"Usuário atualizado":"Usuário criado");
+    try{const r=await api("/usuarios",{method:u?"PATCH":"POST",body});toast(r.aviso||(u?"Usuário atualizado":(body.enviarConvite?"Usuário autorizado · link de ativação enviado":"Usuário autorizado")));
       const s=await api("/sessao");S.atendentes=s.atendentes||[];openUsuarios();}
-    catch(ex){b.disabled=false;b.textContent=u?"Salvar alterações":"Criar usuário";fail(errMsg(ex));}});
+    catch(ex){b.disabled=false;b.textContent=u?"Salvar alterações":"Autorizar usuário";fail(errMsg(ex));}});
 }
 /* ---------- Minha senha ---------- */
 function openSenha(){
@@ -613,7 +625,7 @@ function openSenha(){
    '<div class="m-f"><span class="sp"></span><button type="button" class="btn" data-close>Cancelar</button><button type="submit" class="btn pri" id="s-save">Trocar senha</button></div></form>';
   $("ov").hidden=false;ovDirty=false;setTimeout(()=>$("s-at").focus(),30);
   $("sf").addEventListener("submit",async e=>{e.preventDefault();const er=$("s-err");const fail=m=>{er.textContent=m;er.hidden=false;};er.hidden=true;
-    const atual=$("s-at").value,nova=$("s-nv").value;if(!atual)return fail("Informe a senha atual.");if(nova.length<8)return fail("A nova senha precisa ter pelo menos 8 caracteres.");if(nova!==$("s-cf").value)return fail("A confirmação não confere com a nova senha.");
+    const atual=$("s-at").value,nova=$("s-nv").value;if(!atual)return fail("Informe a senha atual.");if(nova.length<8)return fail("A nova senha precisa ter pelo menos 8 caracteres.");if(!/[A-Za-zÀ-ÿ]/.test(nova)||!/\d/.test(nova))return fail("A nova senha precisa ter letras e números.");if(nova!==$("s-cf").value)return fail("A confirmação não confere com a nova senha.");
     const b=$("s-save");b.disabled=true;b.textContent="Salvando…";
     try{await api("/auth/senha",{method:"POST",body:{atual,nova}});closeOv(true);toast("Senha alterada");}catch(ex){b.disabled=false;b.textContent="Trocar senha";fail(errMsg(ex));}});
 }
@@ -649,7 +661,7 @@ $("btnNew").onclick=()=>openTask(null);$("btnNew2").onclick=()=>openTask(null);$
 $("btnCh").onclick=openNovoChamado;$("btnCh2").onclick=openNovoChamado;
 $("btnCsv").onclick=exportCsv;$("btnCsvCh").onclick=exportCsvCh;
 $("btnRetry").onclick=()=>{S.err=null;boot();};
-$("btnSenha").onclick=openSenha;
+$("btnSenha").onclick=openSenha;$("btnUsers").onclick=openUsuarios;
 $("btnSair").onclick=async()=>{try{await fetch("/api/auth/logout",{method:"POST",credentials:"same-origin"});}catch(e){}location.href="/login";};
 $("pPrev").onclick=()=>shift(-1);$("pNext").onclick=()=>shift(1);
 $("cPrev").onclick=()=>{S.cal.cur=S.cal.mode==="semana"?addD(S.cal.cur,-7):addM(S.cal.cur,-1);render();};
@@ -687,12 +699,12 @@ window.addEventListener("hashchange",()=>{if(/^#chamado=/.test(location.hash)&&!
 
 /* ---------- Inicialização ---------- */
 function setSync(kind,txt){$("syncDot").className="dot"+(kind==="on"?" on":kind==="local"?" local":"");$("syncTxt").textContent=txt;}
-function drawMe(){const m=S.me;$("me").hidden=false;$("me").innerHTML='<span class="av">'+esc(ini(m.nome))+'</span><div><b title="'+esc(m.nome)+'">'+esc(m.nome)+"</b><small>"+(S.admin?"Administrador / Atendente":"Solicitante")+"</small></div>";}
+function drawMe(){const m=S.me;$("me").hidden=false;$("me").innerHTML='<span class="av">'+esc(ini(m.nome))+'</span><div><b title="'+esc(m.nome)+'">'+esc(m.nome)+"</b><small>"+esc(PAPEL[S.me.papel]||"")+"</small></div>";}
 async function boot(){
   setSync("","Conectando…");
   try{
     const s=await api("/sessao");
-    S.me={usuario:s.usuario,nome:s.nome};S.admin=s.papel==="admin";S.lists=s.listas||S.lists;S.atendentes=s.atendentes||[];if(s.hoje)TODAY=s.hoje;
+    S.me={id:s.id,usuario:s.usuario,nome:s.nome,papel:s.papel};S.admin=s.papel==="admin"||s.papel==="atendente";S.super=s.papel==="admin";$("btnUsers").hidden=!S.super;S.lists=s.listas||S.lists;S.atendentes=s.atendentes||[];if(s.hoje)TODAY=s.hoje;
     drawMe();
   }catch(e){
     S.me=S.me||{usuario:"",nome:""};S.err=e;$("vTitle").textContent="Gestão de Processos";

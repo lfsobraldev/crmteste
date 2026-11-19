@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { tarefaImportada } from "@/lib/regras";
-import { erroGP, exigirAdmin, H, q, regra } from "@/lib/servidor";
+import { erroGP, exigirEquipe, H, q, regra } from "@/lib/servidor";
 
 export const runtime = "nodejs";
 
 /** Migração do protótipo: recebe o dados-tarefas.json ({ tarefas: [...] }). Ids já existentes são ignorados (não duplica). */
 export async function POST(req: Request) {
   try {
-    const c = await exigirAdmin();
+    const c = await exigirEquipe();
     const body = await req.json().catch(() => { throw regra("Arquivo JSON inválido."); });
     const lista: unknown[] = Array.isArray(body) ? body : Array.isArray(body?.tarefas) ? body.tarefas : [];
     if (!lista.length) throw regra("O arquivo não tem a lista \"tarefas\".");

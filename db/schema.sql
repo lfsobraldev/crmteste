@@ -1,23 +1,60 @@
 -- Gestão de Processos Famossul + Central de Chamados — estrutura completa do banco (PostgreSQL 13+).
 -- Idempotente: pode rodar mais de uma vez (npm run db:migrar). Só cria objetos; não apaga dados.
 
--- Usuários do sistema (login próprio). papel: admin = Administrador/Atendente; solicitante = abre e acompanha os próprios chamados.
+-- Usuários (acesso corporativo: e-mail @famossul.com.br + senha). papel: admin | atendente | solicitante.
+-- senha_hash nulo = conta autorizada pelo administrador e ainda não ativada (primeiro acesso por link no e-mail).
 create table if not exists gp_usuarios(
  id uuid primary key default gen_random_uuid(),
- usuario varchar(60) not null unique check(usuario ~ '^[a-z0-9._-]{3,60}$'),
+ usuario varchar(160) not null unique,
  nome varchar(160) not null check(length(trim(nome))>0),
  email varchar(160) not null default '',
  setor varchar(80) not null default '',
- papel varchar(12) not null default 'solicitante' check(papel in('admin','solicitante')),
- senha_hash text not null,
+ papel varchar(12) not null default 'solicitante',
+ senha_hash text,
  ativo boolean not null default true,
  falhas_login integer not null default 0,
  bloqueado_ate timestamptz,
  sessao_desde timestamptz not null default now(),
- criado_por varchar(60) not null default '',
+ ultimo_acesso timestamptz,
+ ativado_em timestamptz,
+ criado_por varchar(160) not null default '',
  criado_em timestamptz not null default now(),
  atualizado_em timestamptz not null default now()
 );
+-- Atualização de instalações anteriores (login por nome de usuário, perfis admin/solicitante).
+alter table gp_usuarios drop constraint if exists gp_usuarios_usuario_check;
+alter table gp_usuarios alter column usuario type varchar(160);
+alter table gp_usuarios alter column criado_por type varchar(160);
+alter table gp_usuarios alter column senha_hash drop not null;
+alter table gp_usuarios add column if not exists ultimo_acesso timestamptz;
+alter table gp_usuarios add column if not exists ativado_em timestamptz;
+update gp_usuarios set ativado_em=criado_em where ativado_em is null and senha_hash is not null;
+alter table gp_usuarios drop constraint if exists gp_usuarios_papel_check;
+alter table gp_usuarios add constraint gp_usuarios_papel_check check(papel in('admin','atendente','solicitante'));
+alter table gp_usuarios drop constraint if exists gp_usuarios_email_check;
+alter table gp_usuarios add constraint gp_usuarios_email_check check(email='' or email ~ '^[a-z0-9._%+-]+@famossul\.com\.br$') not valid;
+create unique index if not exists ux_gp_usuarios_email on gp_usuarios(lower(email)) where email<>'';
+
+-- Links de ativação (primeiro acesso) e de recuperação de senha. Guarda só o SHA-256 do token; uso único e validade curta.
+create table if not exists gp_tokens(
+ id uuid primary key default gen_random_uuid(),
+ usuario_id uuid not null references gp_usuarios(id) on delete cascade,
+ tipo varchar(12) not null check(tipo in('ativacao','recuperacao')),
+ token_hash char(64) not null unique,
+ expira_em timestamptz not null,
+ usado_em timestamptz,
+ criado_em timestamptz not null default now(),
+ criado_ip varchar(64) not null default ''
+);
+create index if not exists ix_gp_tokens_usuario on gp_tokens(usuario_id,tipo) where usado_em is null;
+
+-- Limite de tentativas (login e pedidos de e-mail) por chave: ip:<ip>, email:<email>.
+create table if not exists gp_limites(
+ id bigint generated always as identity primary key,
+ chave varchar(220) not null,
+ criado_em timestamptz not null default now()
+);
+create index if not exists ix_gp_limites on gp_limites(chave,criado_em);
 
 -- Tarefas e reuniões (uma linha por ocorrência, como no protótipo). O id é texto para aceitar os ids exportados.
 create table if not exists gp_tarefas(

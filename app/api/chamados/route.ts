@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { hojeBR } from "@/lib/datas";
 import { COLUNAS_CHAMADO, lerChamado, lerListas, listarAtendentes } from "@/lib/consultas";
-import { alterarChamadoSchema, diferencasChamado, isUuid, normalizarTitulo, novoChamadoSchema, podeVerChamado } from "@/lib/regras";
-import { contextoGP, erroGP, exigirAdmin, H, q, regra } from "@/lib/servidor";
+import { alterarChamadoSchema, diferencasChamado, ehEquipe, isUuid, normalizarTitulo, novoChamadoSchema, podeVerChamado } from "@/lib/regras";
+import { contextoGP, erroGP, exigirEquipe, H, q, regra } from "@/lib/servidor";
 
 export const runtime = "nodejs";
 
@@ -21,11 +21,11 @@ export async function GET(req: Request) {
       ]);
       return NextResponse.json({ chamado: ch, eventos, anexos, hoje: hojeBR() }, { headers: H });
     }
-    const filtro = c.papel === "admin" ? "" : "where c.solicitante_usuario=$1";
+    const filtro = ehEquipe(c.papel) ? "" : "where c.solicitante_usuario=$1";
     const chamados = await q(`select ${COLUNAS_CHAMADO},
       (select count(*)::int from gp_chamado_eventos e where e.chamado_id=c.id and e.tipo='comentario') comentarios,
       (select count(*)::int from gp_chamado_anexos a where a.chamado_id=c.id) anexos
-      from gp_chamados c ${filtro} order by c.numero desc limit 5000`, c.papel === "admin" ? [] : [c.usuario]);
+      from gp_chamados c ${filtro} order by c.numero desc limit 5000`, ehEquipe(c.papel) ? [] : [c.usuario]);
     return NextResponse.json({ chamados, hoje: hojeBR() }, { headers: H });
   } catch (e) { return erroGP(e, "Não foi possível carregar os chamados."); }
 }
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
 /** Classificação e andamento (somente Administrador/Atendente). Cada mudança vira histórico; versão evita sobrescrever. */
 export async function PATCH(req: Request) {
   try {
-    const c = await exigirAdmin();
+    const c = await exigirEquipe();
     const b = alterarChamadoSchema.parse(await req.json());
     const atual = await lerChamado(b.id);
     if (!atual) throw new Error("GP_CHAMADO_NAO_ENCONTRADO");

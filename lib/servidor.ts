@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { ZodError } from "zod";
 import { sessao } from "./auth";
-import type { PapelGP } from "./regras";
+import { ehEquipe, type PapelGP } from "./regras";
 
 export { q, type Row } from "./db";
 export const H = { "Cache-Control": "no-store" };
@@ -15,7 +15,14 @@ export async function contextoGP(): Promise<ContextoGP> {
   if (!s) throw new Error("NAO_AUTENTICADO");
   return { id: s.id, usuario: s.usuario, nome: s.nome, papel: s.papel };
 }
-export async function exigirAdmin() {
+/** Equipe de atendimento (administrador ou atendente): chamados de todos, tarefas e cadastros. */
+export async function exigirEquipe() {
+  const c = await contextoGP();
+  if (!ehEquipe(c.papel)) throw new Error("SEM_PERMISSAO");
+  return c;
+}
+/** Somente administrador: usuários e níveis de acesso. */
+export async function exigirAdministrador() {
   const c = await contextoGP();
   if (c.papel !== "admin") throw new Error("SEM_PERMISSAO");
   return c;
@@ -31,7 +38,7 @@ export function erroGP(e: unknown, fallback: string) {
   if (m.includes("GP_VERSAO_DESATUALIZADA")) return r("Este chamado foi alterado por outra pessoa. Os dados foram recarregados; confira e tente de novo.", 409, { codigo: "VERSAO" });
   if (m.includes("GP_CHAMADO_NAO_ENCONTRADO")) return r("Chamado não encontrado.", 404);
   if (/does not exist/.test(m) && /gp_/.test(m)) return r("Banco de dados ainda não preparado. Rode \"npm run db:migrar\" (ou aplique db/schema.sql).", 503, { codigo: "MIGRACAO_PENDENTE" });
-  if (/DATABASE_URL|AUTH_SECRET/.test(m)) return r("Servidor sem configuração: defina DATABASE_URL e AUTH_SECRET.", 500);
+  if (/DATABASE_URL|AUTH_SECRET|APP_URL/.test(m)) return r("Servidor sem configuração: confira DATABASE_URL, AUTH_SECRET e APP_URL.", 500);
   if (/ECONNREFUSED|ENOTFOUND|ETIMEDOUT|timeout exceeded|Connection terminated/i.test(m)) { console.error("[gestao-processos] banco:", m); return r("Sem conexão com o banco de dados. Tente de novo em instantes.", 503); }
   if (m.includes("duplicate key")) return r("Registro duplicado.", 409);
   if (/^GP_/.test(m)) return r(m.replace(/^GP_\w+:\s*/, ""), 400);

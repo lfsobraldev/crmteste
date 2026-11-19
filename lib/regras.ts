@@ -88,40 +88,57 @@ export const chamadoAtrasado = (c: { status: string; prazo?: string | null }, ho
 /** Título comparável para barrar o mesmo chamado aberto duas vezes. */
 export const normalizarTitulo = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
-export type PapelGP = "admin" | "solicitante";
-export const PAPEIS = ["admin", "solicitante"] as const;
+export type PapelGP = "admin" | "atendente" | "solicitante";
+export const PAPEIS = ["admin", "atendente", "solicitante"] as const;
+/** Equipe de atendimento (vê todos os chamados, tarefas e cadastros): administrador e atendente. */
+export const ehEquipe = (p: string) => p === "admin" || p === "atendente";
 
-/* ---------- Usuários (login próprio) ---------- */
+/* ---------- Acesso corporativo ---------- */
+export const DOMINIO = "famossul.com.br";
+export const normalizarEmail = (v: unknown) => String(v ?? "").trim().toLowerCase();
+/** Só e-mails com domínio exato @famossul.com.br (sem subdomínio, sem e-mail pessoal). */
+export const emailCorporativo = (v: unknown) => /^[a-z0-9._%+-]+@famossul\.com\.br$/.test(normalizarEmail(v)) && normalizarEmail(v).length <= 160;
+const email = z.string({ invalid_type_error: "Informe o e-mail." }).transform(normalizarEmail)
+  .pipe(z.string().min(1, "Informe o e-mail corporativo.").refine(emailCorporativo, `Use o seu e-mail corporativo @${DOMINIO}.`));
 export const SENHA_MIN = 8;
-export const loginUsuario = (v: string) => String(v || "").trim().toLowerCase();
-const senha = z.string().min(SENHA_MIN, `A senha precisa ter pelo menos ${SENHA_MIN} caracteres.`).max(200, "Senha longa demais.");
-const login = z.string().transform(loginUsuario).pipe(z.string().regex(/^[a-z0-9._-]{3,60}$/, "Login: 3 a 60 caracteres, só letras minúsculas, números, ponto, hífen ou sublinhado."));
+/** Senha: 8+ caracteres, com letra e número, e diferente do próprio e-mail. */
+export function problemaSenha(senha: string, emailUsuario = "") {
+  if (senha.length < SENHA_MIN) return `A senha precisa ter pelo menos ${SENHA_MIN} caracteres.`;
+  if (senha.length > 200) return "Senha longa demais.";
+  if (!/[A-Za-zÀ-ÿ]/.test(senha) || !/\d/.test(senha)) return "A senha precisa ter letras e números.";
+  const local = emailUsuario.split("@")[0];
+  if (local && senha.toLowerCase().includes(local.toLowerCase()) && local.length >= 4) return "A senha não pode conter o seu e-mail.";
+  return null;
+}
+export const loginSchema = z.object({ email, senha: z.string().min(1, "Informe a senha.").max(200) });
+export const pedidoEmailSchema = z.object({ email });
+export const definirSenhaSchema = z.object({ token: z.string().regex(/^[A-Za-z0-9_-]{43}$/, "Link inválido."), senha: z.string().max(200) });
 export const novoUsuarioSchema = z.object({
-  usuario: login,
+  email,
   nome: texto(160).pipe(z.string().min(2, "Informe o nome.")),
-  email: texto(160).pipe(z.union([z.literal(""), z.string().email("E-mail inválido.")])).default(""),
   setor: texto(80).default(""),
   papel: z.enum(PAPEIS, { errorMap: () => ({ message: "Escolha o perfil." }) }),
-  senha,
+  enviarConvite: z.boolean().default(true),
 });
 export const editarUsuarioSchema = z.object({
   id: uuid,
   nome: texto(160).pipe(z.string().min(2, "Informe o nome.")),
-  email: texto(160).pipe(z.union([z.literal(""), z.string().email("E-mail inválido.")])).default(""),
   setor: texto(80).default(""),
   papel: z.enum(PAPEIS),
   ativo: z.boolean(),
-  senha: z.union([z.literal(""), senha]).default(""),
 });
-export const trocarSenhaSchema = z.object({ atual: z.string().min(1, "Informe a senha atual."), nova: senha });
-/** Nunca deixar o sistema sem administrador ativo, nem o próprio administrador se rebaixar/desativar. */
+export const trocarSenhaSchema = z.object({ atual: z.string().min(1, "Informe a senha atual."), nova: z.string().max(200) });
+/** Nunca deixar o sistema sem administrador ativo, nem o próprio administrador se rebaixar/bloquear. */
 export function conferirMudancaAdmin(p: { eu: boolean; eraAdminAtivo: boolean; seraAdminAtivo: boolean; outrosAdminsAtivos: number }) {
-  if (p.eu && !p.seraAdminAtivo) return "Você não pode tirar o seu próprio acesso de administrador nem desativar a sua conta.";
+  if (p.eu && !p.seraAdminAtivo) return "Você não pode alterar o seu próprio nível de acesso nem bloquear a sua conta.";
   if (p.eraAdminAtivo && !p.seraAdminAtivo && p.outrosAdminsAtivos === 0) return "É preciso manter pelo menos um administrador ativo.";
   return null;
 }
+/** Situação exibida na administração. */
+export const situacaoUsuario = (u: { ativo: boolean; senha_definida: boolean; bloqueado_ate?: string | Date | null }, agora = new Date()) =>
+  !u.ativo ? "bloqueado" : !u.senha_definida ? "pendente" : u.bloqueado_ate && new Date(u.bloqueado_ate) > agora ? "travado" : "ativo";
 /** Quem pode ver/comentar um chamado: atendentes veem todos; o solicitante só os próprios. */
-export const podeVerChamado = (papel: PapelGP, usuario: string, c: Record<string, unknown>) => papel === "admin" || c.solicitante_usuario === usuario;
+export const podeVerChamado = (papel: PapelGP, usuario: string, c: Record<string, unknown>) => ehEquipe(papel) || c.solicitante_usuario === usuario;
 
 /* ---------- Tarefas ---------- */
 export const tarefaSchema = z.object({

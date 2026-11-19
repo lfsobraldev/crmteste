@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { datasRecorrencia, novaTarefaSchema, tarefaSchema } from "@/lib/regras";
-import { erroGP, exigirAdmin, H, q, regra } from "@/lib/servidor";
+import { erroGP, exigirEquipe, H, q, regra } from "@/lib/servidor";
 
 export const runtime = "nodejs";
 
@@ -13,7 +13,7 @@ const RECORDSET = `x(id text,titulo text,tipo text,setor text,jornada text,data 
 /** Tarefas e reuniões da equipe (Agenda, Kanban, Lista, Planejamento): só Administrador/Atendente. */
 export async function GET() {
   try {
-    await exigirAdmin();
+    await exigirEquipe();
     return NextResponse.json({ tarefas: await q(`select ${COLS} from gp_tarefas order by data,hora_ini`) }, { headers: H });
   } catch (e) { return erroGP(e, "Não foi possível carregar as tarefas."); }
 }
@@ -21,7 +21,7 @@ export async function GET() {
 /** Cadastro (com repetição). Ids derivados da chave do formulário: reenvio não duplica. */
 export async function POST(req: Request) {
   try {
-    const c = await exigirAdmin();
+    const c = await exigirEquipe();
     const b = novaTarefaSchema.parse(await req.json());
     const datas = datasRecorrencia(b.dados.data, b.recorrencia, b.ate || b.dados.data);
     if (datas.length > 370) throw regra(`Repetição gera ${datas.length} ocorrências; reduza a data final (máx. 370).`);
@@ -39,7 +39,7 @@ const editarSchema = z.object({ id: z.string().min(1).max(64), dados: tarefaSche
 /** Edição completa (dados) ou só o status (arrastar no Kanban). Com serie=true vale para as próximas ocorrências, exceto status e data. */
 export async function PATCH(req: Request) {
   try {
-    await exigirAdmin();
+    await exigirEquipe();
     const b = editarSchema.parse(await req.json());
     const [t] = await q("select id,serie,to_char(data,'YYYY-MM-DD') data from gp_tarefas where id=$1", [b.id]);
     if (!t) return NextResponse.json({ error: "Tarefa não encontrada (pode ter sido excluída). Recarregue." }, { status: 404, headers: H });
@@ -64,7 +64,7 @@ export async function PATCH(req: Request) {
 /** Exclusão (?id=, &serie=1 apaga esta e as próximas da série). */
 export async function DELETE(req: Request) {
   try {
-    await exigirAdmin();
+    await exigirEquipe();
     const u = new URL(req.url);
     const id = u.searchParams.get("id") || "";
     const [t] = await q("select id,serie,to_char(data,'YYYY-MM-DD') data from gp_tarefas where id=$1", [id]);

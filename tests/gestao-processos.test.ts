@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
 import {
   alterarChamadoSchema, chamadoAtrasado, datasRecorrencia, diferencasChamado, normalizarListas, normalizarTitulo,
-  novoChamadoSchema, podeVerChamado, conferirMudancaAdmin, novoUsuarioSchema, tarefaImportada, tarefaSchema, tipoAnexo, nomeArquivoSeguro, SISTEMAS_PADRAO,
+  novoChamadoSchema, podeVerChamado, conferirMudancaAdmin, novoUsuarioSchema, emailCorporativo, problemaSenha, loginSchema, ehEquipe, tarefaImportada, tarefaSchema, tipoAnexo, nomeArquivoSeguro, SISTEMAS_PADRAO,
 } from "../lib/regras";
 import { conferirSenha, criarToken, hashSenha, lerToken } from "../lib/auth";
 
@@ -28,10 +28,25 @@ test("permissões e usuários: solicitante só os próprios chamados; sempre há
   assert.match(conferirMudancaAdmin({ eu: true, eraAdminAtivo: true, seraAdminAtivo: false, outrosAdminsAtivos: 3 }) || "", /próprio/);
   assert.match(conferirMudancaAdmin({ eu: false, eraAdminAtivo: true, seraAdminAtivo: false, outrosAdminsAtivos: 0 }) || "", /pelo menos um/);
   assert.equal(conferirMudancaAdmin({ eu: false, eraAdminAtivo: true, seraAdminAtivo: false, outrosAdminsAtivos: 1 }), null);
-  const u = novoUsuarioSchema.parse({ usuario: " Joao.Silva ", nome: "João", papel: "solicitante", senha: "12345678" });
-  assert.equal(u.usuario, "joao.silva");
-  assert.throws(() => novoUsuarioSchema.parse({ ...u, usuario: "jo ão" }), /Login/);
-  assert.throws(() => novoUsuarioSchema.parse({ ...u, senha: "curta" }), /8 caracteres/);
+  assert.equal(podeVerChamado("atendente", "bia", { solicitante_usuario: "ana" }), true);
+  assert.equal(ehEquipe("solicitante"), false);
+  const u = novoUsuarioSchema.parse({ email: " Joao.Silva@FAMOSSUL.com.br ", nome: "João", papel: "atendente" });
+  assert.equal(u.email, "joao.silva@famossul.com.br");
+  assert.equal(u.enviarConvite, true);
+  assert.throws(() => novoUsuarioSchema.parse({ ...u, papel: "dono" }), /perfil/);
+  assert.throws(() => novoUsuarioSchema.parse({ ...u, email: "joao@gmail.com" }), /corporativo/);
+});
+
+test("acesso corporativo: só o domínio exato @famossul.com.br, no navegador e no servidor", async () => {
+  for (const ok of ["ana@famossul.com.br", " Ana.Souza@Famossul.com.br ", "ti+teste@famossul.com.br"]) assert.equal(emailCorporativo(ok), true, ok);
+  for (const ruim of ["ana@gmail.com", "ana@famossul.com", "ana@sub.famossul.com.br", "ana@famossul.com.br.evil.com", "ana@xfamossul.com.br", "anafamossul.com.br", "@famossul.com.br", "ana @famossul.com.br"]) assert.equal(emailCorporativo(ruim), false, ruim);
+  assert.throws(() => loginSchema.parse({ email: "fulano@hotmail.com", senha: "x" }), /corporativo/);
+  const js = await readFile("public/acesso.js", "utf8");
+  assert.match(js, /famossul\\\.com\\\.br\$/);
+  assert.equal(problemaSenha("curta1"), "A senha precisa ter pelo menos 8 caracteres.");
+  assert.match(problemaSenha("somenteletras") || "", /letras e números/);
+  assert.match(problemaSenha("joaosilva123", "joaosilva@famossul.com.br") || "", /e-mail/);
+  assert.equal(problemaSenha("Processo2026", "ana@famossul.com.br"), null);
 });
 
 test("login: senha com scrypt e token assinado com validade", () => {
@@ -95,7 +110,10 @@ test("banco: abertura sem duplicar, histórico automático, versão e conclusão
   try {
     await db.exec(schema);
     await db.exec(schema); // idempotente
-    await assert.rejects(db.query("insert into gp_usuarios(usuario,nome,senha_hash) values('Maiúscula','X','h')"), /check/);
+    await assert.rejects(db.query("insert into gp_usuarios(usuario,email,nome) values('x@gmail.com','x@gmail.com','X')"), /check/);
+    await assert.rejects(db.query("insert into gp_usuarios(usuario,email,nome,papel) values('y@famossul.com.br','y@famossul.com.br','Y','dono')"), /check/);
+    await db.query("insert into gp_usuarios(usuario,email,nome) values('ana@famossul.com.br','ana@famossul.com.br','Ana')");
+    await assert.rejects(db.query("insert into gp_usuarios(usuario,email,nome) values('ANA2','ana@famossul.com.br','Ana 2')"), /duplicate|unique/, "e-mail único");
     const abrir = `with novo as (insert into gp_chamados(chave,titulo,sistema,tipo,descricao,prioridade,solicitante_usuario,solicitante_nome)
       values($1,'Erro no inventário','Inventário','Erro','Tela de contagem não salva.','Alta','caio','Caio') on conflict(chave) do nothing returning id,numero)
       , ev as (insert into gp_chamado_eventos(chamado_id,tipo,texto,autor_usuario,autor_nome) select id,'abertura','Chamado aberto','caio','Caio' from novo)
@@ -122,5 +140,28 @@ test("banco: abertura sem duplicar, histórico automático, versão e conclusão
     assert.equal(ev[8].de, "Bia");
     await assert.rejects(db.query("insert into gp_chamados(chave,titulo,sistema,tipo,descricao,solicitante_usuario) values(gen_random_uuid(),'Título ok','X','Erro','Descrição suficiente','u') returning id").then(() => db.query("insert into gp_chamado_eventos(chamado_id,tipo,autor_usuario) values($1,'apagar','u')", [id])), /check/);
     await assert.rejects(db.query("insert into gp_tarefas(id,titulo,data,hora_ini,hora_fim) values('t1','Reunião','2026-11-19','10:00','09:00')"), /check/);
+  } finally { await db.close(); }
+});
+
+test("banco: atualiza a instalação anterior (login por usuário) sem perder contas", async () => {
+  const schema = await readFile("db/schema.sql", "utf8");
+  const db = new PGlite();
+  try {
+    await db.exec(`create table gp_usuarios(id uuid primary key default gen_random_uuid(),usuario varchar(60) not null unique check(usuario ~ '^[a-z0-9._-]{3,60}$'),
+      nome varchar(160) not null,email varchar(160) not null default '',setor varchar(80) not null default '',papel varchar(12) not null default 'solicitante' check(papel in('admin','solicitante')),
+      senha_hash text not null,ativo boolean not null default true,falhas_login integer not null default 0,bloqueado_ate timestamptz,sessao_desde timestamptz not null default now(),
+      criado_por varchar(60) not null default '',criado_em timestamptz not null default now(),atualizado_em timestamptz not null default now());
+      insert into gp_usuarios(usuario,nome,papel,senha_hash) values('admin','Administrador','admin','scrypt$x$y');`);
+    await db.exec(schema);
+    const r = (await db.query<{ usuario: string; ativado: boolean }>("select usuario,ativado_em is not null ativado from gp_usuarios")).rows;
+    assert.deepEqual(r, [{ usuario: "admin", ativado: true }]);
+    await db.query("insert into gp_usuarios(usuario,email,nome,papel) values('bia@famossul.com.br','bia@famossul.com.br','Bia','atendente')");
+    const [{ id }] = (await db.query<{ id: string }>("select id from gp_usuarios where usuario='bia@famossul.com.br'")).rows;
+    await db.query("insert into gp_tokens(usuario_id,tipo,token_hash,expira_em) values($1,'ativacao',$2,now()+interval '30 minutes')", [id, "a".repeat(64)]);
+    const uso = "update gp_tokens set usado_em=now() where token_hash=$1 and usado_em is null and expira_em>now() returning id";
+    assert.equal((await db.query(uso, ["a".repeat(64)])).rows.length, 1);
+    assert.equal((await db.query(uso, ["a".repeat(64)])).rows.length, 0, "uso único");
+    await db.query("insert into gp_tokens(usuario_id,tipo,token_hash,expira_em) values($1,'recuperacao',$2,now()-interval '1 minute')", [id, "b".repeat(64)]);
+    assert.equal((await db.query(uso, ["b".repeat(64)])).rows.length, 0, "expirado");
   } finally { await db.close(); }
 });

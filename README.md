@@ -20,7 +20,7 @@ npm run build
 npm start
 ```
 
-- Antes de rodar, preencha `DATABASE_URL`, `AUTH_SECRET`, `ADMIN_USUARIO` e `ADMIN_SENHA_INICIAL` no `.env.local`.
+- Antes de rodar, preencha no `.env.local` as variáveis da tabela abaixo (banco, segredo, endereço, SMTP e primeiro administrador).
 - `npm run db:migrar` cria as tabelas. É idempotente.
 - Para desenvolvimento, use `npm run dev`.
 - Na **Vercel**: importe o repositório, cadastre as mesmas variáveis em Settings → Environment Variables e rode `npm run db:migrar` uma vez apontando para o banco de produção. Também dá para colar `db/schema.sql` no editor SQL do Neon.
@@ -30,25 +30,58 @@ npm start
 | Variável | Obrigatória | Uso |
 |---|---|---|
 | `DATABASE_URL` | sim | String de conexão do PostgreSQL. Com Neon, use a string *pooled*. |
-| `AUTH_SECRET` | sim | Segredo do cookie de sessão. Use 32 caracteres aleatórios ou mais (`openssl rand -hex 32`). |
-| `ADMIN_USUARIO`, `ADMIN_SENHA_INICIAL` | no 1º acesso | Criam o primeiro administrador no primeiro login, e só se ainda não houver nenhum administrador. Depois, troque a senha em **Minha senha**. |
-| `SESSAO_HORAS` | não | Validade da sessão, de 1 a 24 h. O padrão é 12. |
-| `FUSO_HORARIO` | não | Fuso usado para "hoje" e para o cálculo de atraso. O padrão é `America/Sao_Paulo`. |
-| `DB_POOL_MAX` | não | Número de conexões por instância. O padrão é 5. |
+| `AUTH_SECRET` | sim | Segredo do cookie de sessão: 32+ caracteres aleatórios (`openssl rand -hex 32`). |
+| `APP_URL` | sim* | Endereço público usado nos links dos e-mails. *Na Vercel, se ficar vazio, usa o domínio de produção. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE`, `SMTP_TLS_OBRIGATORIO`, `EMAIL_REMETENTE` | sim | Envio dos links de ativação e de recuperação. Funciona com Microsoft 365, Google Workspace ou o servidor de e-mail da empresa. |
+| `ADMIN_EMAIL`, `ADMIN_SENHA_INICIAL` | no 1º acesso | Primeiro administrador: e-mail `@famossul.com.br` e senha com 8+ caracteres. Só funcionam enquanto não existir administrador com e-mail. Depois de entrar, troque a senha em **Minha senha**. |
+| `SESSAO_HORAS`, `FUSO_HORARIO`, `DB_POOL_MAX` | não | Validade da sessão (padrão 12 h), fuso (padrão `America/Sao_Paulo`) e conexões (padrão 5). |
 
-Nenhuma credencial vem preenchida. Banco, hospedagem e domínio são definidos pela TI.
+Nenhuma credencial vem preenchida. O SMTP precisa de uma caixa remetente da empresa: a TI cria a caixa e informa os dados.
+
+### Atualizar uma instalação que já está no ar
+
+1. Rode `npm run db:migrar` de novo, ou cole `db/schema.sql` no Neon. O script é idempotente: cria `gp_tokens` e `gp_limites` e converte `gp_usuarios` para login por e-mail, sem apagar contas nem chamados.
+2. Troque `ADMIN_USUARIO` por `ADMIN_EMAIL` e cadastre `APP_URL` e as variáveis de SMTP.
+3. Faça o redeploy.
+4. As contas da versão anterior, que entravam por nome de usuário, não têm e-mail e por isso não entram mais. Elas aparecem em **Usuários** como "sem e-mail (conta antiga)". Autorize essas pessoas pelo e-mail corporativo e bloqueie as contas antigas.
+
+## Acesso corporativo
+
+- **Somente `@famossul.com.br`**, com o domínio exato. São recusados subdomínios, e-mails pessoais e outros domínios. A checagem é feita no navegador, de novo no servidor e também no banco (constraint em `gp_usuarios.email`).
+- **Primeiro acesso:**
+  1. O administrador autoriza o e-mail em **Usuários → Autorizar novo usuário**, informando nome, setor e perfil. Ele pode enviar o convite na hora.
+  2. Se o convite não foi enviado, a pessoa abre **Primeiro acesso**, informa o e-mail e recebe o link.
+  3. A pessoa cria a própria senha. A conta fica ativa e ela já entra.
+  4. O administrador nunca vê nem define senhas.
+- **Links de ativação e de recuperação:**
+  - O token tem 256 bits aleatórios, e o banco guarda só o SHA-256.
+  - Valem **30 minutos** e só podem ser usados **uma vez**.
+  - Pedir um link novo invalida o anterior. Bloquear a conta invalida os links pendentes.
+  - O token é retirado da barra de endereço assim que a página abre.
+- **Login:**
+  - E-mail e senha, com botão para mostrar a senha.
+  - Mensagens claras para conta não ativada, conta bloqueada, senha incorreta e acesso travado.
+  - **5 senhas erradas** travam a conta por 15 minutos.
+  - Limite por rede: 30 tentativas de login a cada 15 minutos.
+  - Limite de pedidos de link: 3 por e-mail e 10 por rede a cada 15 minutos.
+  - "Primeiro acesso" e "Esqueci minha senha" dão sempre a mesma resposta, para não revelar quais e-mails estão cadastrados.
+- **Senhas:**
+  - Guardadas só como hash scrypt com salt por usuário, nunca em texto.
+  - Regras: 8+ caracteres, com letras e números, e sem conter o próprio e-mail.
+  - Redefinir a senha encerra as sessões abertas em outros aparelhos.
+- **Sessão:**
+  - Cookie `HttpOnly`, `SameSite=Lax`, `Secure` em HTTPS, assinado com HMAC, válido por 12 h.
+  - A cada requisição o servidor confere se a conta continua ativa. Bloquear a conta ou mudar o perfil corta o acesso na hora.
 
 ## Perfis e permissões (conferidos no servidor)
 
 | Perfil | Pode |
 |---|---|
-| **Administrador / Atendente** | Ver todos os chamados; classificar e priorizar; definir responsável e prazo; mudar o status; comentar; gerenciar cadastros e usuários; usar tarefas, agenda e planejamento. |
-| **Solicitante** | Abrir chamados; ver só os próprios; acompanhar o andamento; comentar e anexar informações; consultar a conclusão. |
+| **Administrador** | Tudo, inclusive **Usuários**: autorizar e-mails, ativar e bloquear contas, definir perfis, consultar o último acesso e enviar links. |
+| **Atendente** | Ver todos os chamados; classificar e priorizar; definir responsável, prazo e status; comentar. Também usa tarefas, agenda, planejamento e cadastros (sistemas, setores…). Não administra usuários. |
+| **Solicitante** | Abrir chamados, ver só os próprios, acompanhar, comentar e anexar, e consultar a conclusão. |
 
-- Os usuários são criados pelo administrador em **Cadastros → Gerenciar usuários**. Não há cadastro aberto.
-- Trocar a senha, o perfil ou desativar uma conta encerra as sessões abertas dessa pessoa.
-- O sistema não deixa ficar sem administrador ativo.
-- Depois de 8 senhas erradas, a conta fica bloqueada por 15 minutos.
+Ninguém altera o próprio nível de acesso nem bloqueia a própria conta, e o sistema não deixa ficar sem administrador ativo. Todas as rotas `/api/*` exigem sessão válida e conferem o perfil.
 
 ## Funcionamento
 
@@ -97,17 +130,17 @@ Em **Cadastros → Importar tarefas**, escolha `docs/dados-tarefas.json`, que tr
 
 | Caminho | Conteúdo |
 |---|---|
-| `app/route.ts`, `app/login/route.ts` | Páginas (sem login, `/` redireciona para `/login`) |
-| `app/api/*` | `auth/login`, `auth/logout`, `auth/senha`, `sessao`, `usuarios`, `chamados` (+ `comentarios`, `anexos`), `tarefas` (+ `importar`), `listas` |
+| `app/route.ts`, `app/login`, `app/primeiro-acesso`, `app/recuperar`, `app/definir-senha` | Páginas (sem login, `/` redireciona para `/login`) |
+| `app/api/*` | `auth/login`, `auth/logout`, `auth/senha`, `auth/primeiro-acesso`, `auth/recuperar`, `auth/token`, `auth/definir-senha`, `sessao`, `usuarios` (+ `convite`), `chamados` (+ `comentarios`, `anexos`), `tarefas` (+ `importar`), `listas` |
 | `lib/regras.ts` | Validações, permissões, recorrência e tipos de anexo (puro, testado) |
-| `lib/auth.ts`, `lib/db.ts`, `lib/servidor.ts`, `lib/consultas.ts` | Login, banco, sessão e erros |
-| `lib/pagina.ts`, `lib/login-pagina.ts`, `public/gp.css`, `public/gp.js` | Interface (HTML/CSS/JS do protótipo, adaptado) |
+| `lib/auth.ts`, `lib/tokens.ts`, `lib/limites.ts`, `lib/email.ts`, `lib/links.ts` | Sessão, links de uso único, limite de tentativas e envio por SMTP |
+| `lib/db.ts`, `lib/servidor.ts`, `lib/consultas.ts` | Banco, permissões e erros |
+| `lib/pagina.ts`, `lib/login-pagina.ts`, `public/gp.css`, `public/gp.js`, `public/acesso.js` | Interface (HTML/CSS/JS do protótipo, adaptado) |
 | `db/schema.sql`, `scripts/migrar.mjs` | Estrutura do banco e aplicação |
 | `tests/` | `npm test`: regras, login e banco (PGlite, sem servidor externo) |
 
 ## Fora do escopo (a definir pela TI)
 
 - **Notificações por e-mail ou WhatsApp:** exigem um serviço de envio e credenciais, que não foram criados.
-- **Login corporativo (Microsoft/Google/AD):** hoje o login é próprio (usuário e senha).
-- **Recuperação de senha por e-mail:** hoje o administrador redefine a senha em Cadastros.
+- **Login único (SSO) com Microsoft 365 ou Google:** hoje o login é por e-mail corporativo e senha própria do sistema.
 - **Exclusão de chamados ou anexos:** o histórico é preservado de propósito.

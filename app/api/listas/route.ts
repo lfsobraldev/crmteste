@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { CHAVES_LISTAS, normalizarListas } from "@/lib/regras";
-import { erroGP, exigirAdmin, H, q, regra } from "@/lib/servidor";
+import { erroGP, exigirEquipe, H, q, regra } from "@/lib/servidor";
 
 export const runtime = "nodejs";
 
 /** Cadastros (setores, tipos, jornadas, pessoas e sistemas): só Administrador/Atendente. */
 export async function PUT(req: Request) {
   try {
-    const c = await exigirAdmin();
+    const c = await exigirEquipe();
     const l = normalizarListas(await req.json());
     if (!l.sistemas.length) throw regra("Cadastre pelo menos um sistema para a Central de Chamados.");
     const linhas = CHAVES_LISTAS.map((k) => ({ chave: k, valor: l[k] }));
