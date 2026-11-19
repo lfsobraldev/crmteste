@@ -1,0 +1,33 @@
+{
+  "name": "gestao-processos-famossul",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gestão de Processos Famossul + Central de Chamados e Solicitações de Sistemas",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "db:migrar": "node scripts/migrar.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "next": "16.4.6",
+    "pg": "^8.23.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.17",
+    "@electric-sql/pglite-socket": "0.2.20",
+    "@types/node": "^22.10.5",
+    "@types/pg": "^8.15.0",
+    "@types/react": "^19.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.7.2"
+  }
+}
